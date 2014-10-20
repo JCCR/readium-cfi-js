@@ -82,6 +82,164 @@ EPUBcfi.Generator = {
         return commonCFIComponent.substring(1, commonCFIComponent.length) + "," + range1CFI + "," + range2CFI;
     },
 
+    // -- START OF JCCR's ELEMENT AND TEXT NODE RANGE COMPONENT CODE -->
+
+    generateMixedRangeComponent: function (rangeStartElement, startOffset, rangeEndElement, endOffset, commonAncestor, classBlacklist, elementBlacklist, idBlacklist) {
+        var range1ElementType, range2ElementType;
+
+        range1ElementType = this.validateAndGetNodeType(rangeStartElement);
+        range2ElementType = this.validateAndGetNodeType(rangeEndElement);
+
+//            //var sameParent = $(rangeStartElement).parent()[0] === commonAncestor || $(rangeEndElement).parent()[0] === commonAncestor;
+        var differentParents = !($(rangeStartElement).parent()[0] === $(rangeEndElement).parent()[0]);
+
+        if (!commonAncestor) {
+            // No common ancestor given, find it..
+//                if (sameParent) {
+//                    commonAncestor = "html";
+//                } else {
+            // Create a document range to find the common ancestor
+            var rangeInfo = this.getResolvedRangeInfo(rangeStartElement,startOffset, rangeEndElement, endOffset);
+            commonAncestor = rangeInfo.commonAncestor;
+            //}
+        } else {
+            //resolve commonAncestor given if its a commonAncestorContainer along with start and end containers and not elements
+            commonAncestor = this.resolveCommonAncestor(rangeStartElement, rangeEndElement, commonAncestor);
+        }
+
+        if (!commonAncestor) {
+            throw new EPUBcfi.NodeTypeError(commonAncestor, "CFI target for generating mixed range has no commonAncestor?");
+        }
+
+        // Generate range components
+        var range1Cfi = this.generateRangeCfiComponentFromNode(rangeStartElement, range1ElementType, startOffset, false, differentParents, commonAncestor, classBlacklist, elementBlacklist, idBlacklist);
+        var range2Cfi = this.generateRangeCfiComponentFromNode(rangeEndElement, range2ElementType, endOffset, true, differentParents, commonAncestor, classBlacklist, elementBlacklist, idBlacklist);
+
+        // Generate shared component
+        var commonCFIComponent = this.createCFIElementSteps($(commonAncestor), "html", classBlacklist, elementBlacklist, idBlacklist);
+
+        // Return the result
+        var result = commonCFIComponent.substring(1, commonCFIComponent.length) + "," + range1Cfi + "," + range2Cfi;
+
+        return result;
+    },
+
+    getResolvedRangeInfo: function (rangeStartElement, startOffset, rangeEndElement, endOffset) {
+        // Create a document range to find the common ancestor
+        var docRange = rangeStartElement.ownerDocument.createRange();
+        docRange.setStart(rangeStartElement, startOffset);
+        docRange.setEnd(rangeEndElement, endOffset);
+        return this.normalizeRange(docRange);
+    },
+
+    normalizeRange: function (docRange) {
+        var normalizedRange = {
+            startElement: docRange.startContainer,
+            startOffset: docRange.startOffset,
+            endElement: docRange.endContainer,
+            endOffset: docRange.endOffset,
+            commonAncestor: docRange.commonAncestorContainer
+        };
+        normalizedRange.commonAncestor = this.resolveCommonAncestor(normalizedRange.startElement, normalizedRange.endElement, normalizedRange.commonAncestor);
+        return normalizedRange;
+    },
+
+    resolveCommonAncestor: function (rangeStartElement, rangeEndElement, commonAncestorContainer) {
+        if ($(commonAncestorContainer)[0].nodeType === Node.TEXT_NODE) {
+            //text nodes can be commonAncestors in ranges, we don't want that, therefore we get the parent of the ancestor
+            return $(commonAncestorContainer).parent()[0];
+        } else {
+            return commonAncestorContainer;
+        }
+//            //we get common ancestor containers and start and end containers,
+//            //but need common ancestor containers and start and end elements instead
+//            else if (commonAncestorContainer === rangeStartElement || commonAncestorContainer === rangeEndElement) {
+//                return  $(commonAncestorContainer).parent()[0];
+//            } else {
+//                return commonAncestorContainer;
+//            }
+    },
+
+    generateRangeCfiComponentFromNode: function (node, nodeType, nodeOffset, isEndNode, differentParents, commonAncestor, classBlacklist, elementBlacklist, idBlacklist) {
+
+        var cfiPart;
+        if (nodeType === Node.TEXT_NODE && differentParents) {
+            // Generate terminating offset and range 1
+            offsetStep = this.createCFITextNodeStep($(node), nodeOffset, classBlacklist, elementBlacklist, idBlacklist);
+            cfiPart = this.createCFIElementSteps($(node).parent(), commonAncestor, classBlacklist, elementBlacklist, idBlacklist) + offsetStep;
+        } else
+        if (nodeType === Node.TEXT_NODE) {
+            cfiPart = this.createCFITextNodeStep($(node), nodeOffset, classBlacklist, elementBlacklist, idBlacklist);
+        } else if (nodeType === Node.ELEMENT_NODE && nodeOffset === 0) {
+            cfiPart = this.createCFIElementSteps($(node), commonAncestor, classBlacklist, elementBlacklist, idBlacklist);
+        } else {
+            var childNode = $(node)[0].childNodes[nodeOffset];
+            if (!childNode) {
+                throw new EPUBcfi.NodeTypeError(node, "CFI target for generating mixed range has an invalid node offset. ");
+            }
+            //potential case for a bug here, this used to generate just an element step but now it handles a text node too
+            //this is because the target childNode can be an element or a text node..
+            //this same function should try to be used recursively to not have this code duplication
+            if (childNode.nodeType === Node.TEXT_NODE) {
+                var charEndOffset= isEndNode? 0: childNode.length;
+                cfiPart = this.createCFITextNodeStep($(childNode), charEndOffset, classBlacklist, elementBlacklist, idBlacklist);
+            } else if (childNode.nodeType === Node.ELEMENT_NODE) {
+                cfiPart = this.createCFIElementSteps($(childNode), commonAncestor, classBlacklist, elementBlacklist, idBlacklist);
+            } else {
+                throw new EPUBcfi.NodeTypeError(node, "CFI target for generating mixed range has an invalid node type. ");
+            }
+        }
+        return cfiPart;
+    },
+
+    validateAndGetNodeType: function (node) {
+        if (this.validateTextNode(node)) {
+            return Node.TEXT_NODE;
+        } else if (this.validateElementNode(node)) {
+            return Node.ELEMENT_NODE;
+        } else {
+            throw new EPUBcfi.NodeTypeError(node, "CFI target for generating mixed range is neither a valid text or element node.");
+        }
+    },
+
+    validateTextNode: function (startTextNode, characterOffset) {
+
+        // Check that the text node to start from IS a text node
+        if (!startTextNode) {
+            //throw new EPUBcfi.NodeTypeError(startTextNode, "Cannot generate a character offset from a starting point that is not a text node");
+            return false;
+        } else if (startTextNode.nodeType != Node.TEXT_NODE) {
+            //throw new EPUBcfi.NodeTypeError(startTextNode, "Cannot generate a character offset from a starting point that is not a text node");
+            return false;
+        }
+
+        // Check that the character offset is within a valid range for the text node supplied
+        if (characterOffset < 0) {
+            //throw new EPUBcfi.OutOfRangeError(characterOffset, 0, "Character offset cannot be less than 0");
+            return false;
+        }
+        else if (characterOffset > startTextNode.nodeValue.length) {
+            //throw new EPUBcfi.OutOfRangeError(characterOffset, startTextNode.nodeValue.length - 1, "character offset cannot be greater than the length of the text node");
+            return false;
+        }
+
+        return true;
+    },
+
+    validateElementNode: function (startElement) {
+
+        if (!startElement) {
+            //throw new EPUBcfi.NodeTypeError(startElement, "CFI target element is undefined");
+            return false;
+        }
+
+        return startElement.nodeType && startElement.nodeType === Node.ELEMENT_NODE;
+
+
+    },
+
+    // <-- END OF JCCR's ELEMENT AND TEXT NODE RANGE COMPONENT CODE --
+
     generateRangeComponent : function (rangeStartElement, startOffset, rangeEndElement, endOffset, classBlacklist, elementBlacklist, idBlacklist) {
         if (rangeStartElement.nodeType === Node.ELEMENT_NODE && rangeEndElement.nodeType === Node.ELEMENT_NODE && !startOffset && !endOffset) {
             return this.generateElementRangeComponent(rangeStartElement, rangeEndElement, classBlacklist, elementBlacklist, idBlacklist);
@@ -134,7 +292,10 @@ EPUBcfi.Generator = {
             commonCFIComponent = this.createCFIElementSteps($(commonAncestor), "html", classBlacklist, elementBlacklist, idBlacklist);
 
             // Return the result
-            return commonCFIComponent.substring(1, commonCFIComponent.length) + "," + range1CFI + "," + range2CFI;
+            console.log("vilmosioo's: "+commonCFIComponent.substring(1, commonCFIComponent.length) + "," + range1CFI + "," + range2CFI);
+            var rangeCfi = this.generateMixedRangeComponent(rangeStartElement, startOffset, rangeEndElement, endOffset, classBlacklist, elementBlacklist, idBlacklist);
+            console.log("jccr's: " +rangeCfi);
+            return rangeCfi;
         }
     },
 
