@@ -96,6 +96,40 @@ describe("CFI GENERATOR", function () {
         });
 
 
+        it("can generate a range component between element nodes with a complex hierarchy", function () {
+
+            var dom =
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+                +    "<head>"
+                +        "<title>Title</title>"
+                +    "</head>"
+                +    "<body>"
+                +        "<h1 id=\"h-with-id\">Header 1</h1>\n"
+                +        "<div id=\"common-container\">\n"
+                +           "<h2>Header 2</h2>\n"
+                +           "<p>Paragraph text 1</p>\n"
+                +           "<br />\n"
+                +           "<div>\n"
+                +                "<div>\n"
+                +                    "<p id=\"p-with-id\">\n"
+                +                        "<span>Span text 1</span>\n"
+                +                        "<span>Span text 2</span>\n"
+                +                        "<span>Span text 3</span>\n"
+                +                    "</p>\n"
+                +                "</div>\n"
+                +            "</div>\n"
+                +            "<p>Paragraph text 2</p>\n"
+                +       "</div>\n"
+                +    "</body>"
+                +"</html>";
+            var $dom = $((new window.DOMParser).parseFromString(dom, "text/xml"));
+
+            var $startElement1 = $($('#common-container', $dom)[0]);
+            var $startElement2 = $($('p', $startElement1)[2]);
+            var generatedCFI = EPUBcfi.Generator.generateRangeComponent($startElement1[0], 5, $startElement2[0], 0);
+            expect(generatedCFI).toEqual("/4/4[common-container],/6,/10");
+        });
+
         it("can generate an element range CFI for a node with a period in the ID", function () {
 
            var dom = 
